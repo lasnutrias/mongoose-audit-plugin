@@ -1,5 +1,6 @@
 import { Schema, UpdateQuery } from 'mongoose';
 import { AuditOptions } from './audit.options';
+import { set } from 'lodash';
 
 /**
  * Plugin that allows for adding user audit fields into the entities.
@@ -19,7 +20,7 @@ export function AuditPlugin(schema: Schema, options: AuditOptions = {}) {
       ? 'updatedBy'
       : options.updatedBy;
 
-  const getUser = () => options.currentUser?.() || 'UNKNOWN_USER';
+  const getUser = () => options.currentUser?.() ?? 'UNKNOWN_USER';
 
   // 2. Añadir campos al esquema dinámicamente si no son false
   const schemaAdditions: Record<string, { type: any }> = {};
@@ -43,7 +44,7 @@ export function AuditPlugin(schema: Schema, options: AuditOptions = {}) {
   // 4. Hook para Actualizaciones (Queries)
   schema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function () {
     const user = getUser();
-    const update = this.getUpdate() as UpdateQuery<any>;
+    const update = (this.getUpdate() ?? {}) as UpdateQuery<any>;
     const $set: Record<string, any> = {};
     const $setOnInsert: Record<string, any> = {};
     if (updatedByField) {
@@ -57,5 +58,21 @@ export function AuditPlugin(schema: Schema, options: AuditOptions = {}) {
       $set: { ...update?.$set, ...$set },
       $setOnInsert: { ...update?.$setOnInsert, ...$setOnInsert },
     });
+  });
+
+  // 5. Hook para InsertMany
+  schema.pre('insertMany', function (docs) {
+    // 1. Si no hay campos que auditar, salimos de inmediato
+    if (!createdByField && !updatedByField) return;
+
+    const user = getUser();
+
+    if (Array.isArray(docs)) {
+      docs.forEach((doc) => {
+        // Usamos set de lodash para las rutas 'a.b.c'
+        if (createdByField) set(doc, createdByField, user);
+        if (updatedByField) set(doc, updatedByField, user);
+      });
+    }
   });
 }
